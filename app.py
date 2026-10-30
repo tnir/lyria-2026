@@ -225,7 +225,7 @@ async def analyze_frame(req: FrameAnalysisRequest):
 
         response = await asyncio.to_thread(
             client.models.generate_content,
-            model="gemini-3.8-flash",
+            model="gemini-4-argon",
             contents=[
                 types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
                 telemetry_text,
@@ -268,7 +268,7 @@ async def analyze_frame(req: FrameAnalysisRequest):
             arp_density=max(0.1, min(1.0, float(data.get("arp_density", 0.6)))),
             drum_intensity=max(0.1, min(1.0, float(data.get("drum_intensity", 0.6)))),
             weighted_prompts=prompts,
-            source="gemini-3.8-flash",
+            source="gemini-4-argon",
         )
     except Exception as exc:
         logger.warning("Gemini frame analysis fallback triggered: %s", exc)
