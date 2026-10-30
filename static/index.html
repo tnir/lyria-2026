@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Future VJ // Lyria Camera &amp; Shader Vibe Studio</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&amp;family=JetBrains+Mono:wght@400;500;600;700&amp;family=Noto+Sans+JP:wght@400;500;700&amp;display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/static/styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <!-- Top Header -->
+    <header class="top-bar">
+      <div class="brand-group">
+        <div class="live-badge" id="liveBadge">
+          <span class="pulse-dot"></span>
+          <span id="liveStatusText">STANDBY</span>
+        </div>
+        <div class="brand-titles">
+          <h1>FUTURE VJ <span class="accent-slash">//</span> LYRIA CAMERA &amp; SHADER VIBE</h1>
+          <p class="subtitle">PCカメラ映像＆ハンドジェスチャーから音楽をリアルタイム生成</p>
+        </div>
+      </div>
+
+      <div class="header-actions">
+        <button id="btnStartAll" class="btn btn-primary btn-glow">
+          <span class="btn-icon">▶</span> カメラ＆音楽スタート
+        </button>
+        <button id="btnSimMode" class="btn btn-secondary" title="PCカメラがない環境やデモ確認用のバーチャルカメラ映像に切り替えます">
+          🎥 バーチャルカメラ切替
+        </button>
+        <button id="btnAnalyzeNow" class="btn btn-secondary" title="Gemini AIで現在のカメラフレームを即座に音楽プロンプトへ変換">
+          ✨ AIシーン解析
+        </button>
+        <button id="btnApiModal" class="btn btn-ghost" title="Gemini / Lyria RealTime API設定">
+          ⚙ API / Lyria設定
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Grid -->
+    <main class="studio-grid">
+      <!-- Left / Center Column: Dual Vision + Shader Stage & Sequencer -->
+      <section class="stage-column">
+        <div class="viewport-card">
+          <div class="viewport-header">
+            <div class="viewport-tabs">
+              <button class="tab-btn active" data-view="hybrid">ハイブリッド (Camera + Shader Vibe)</button>
+              <button class="tab-btn" data-view="camera">PCカメラ + MediaPipe HUD</button>
+              <button class="tab-btn" data-view="shader">Shader Vibe VJ フル表示</button>
+            </div>
+            <div class="telemetry-pills">
+              <span class="pill" id="pillSource">📷 SOURCE: READY</span>
+              <span class="pill" id="pillHands">🖐 HANDS: 0</span>
+              <span class="pill" id="pillKeyBpm">🎵 C Dorian • 122 BPM</span>
+            </div>
+          </div>
+
+          <div class="canvas-stage" id="canvasStage">
+            <!-- Hidden raw video element for webcam -->
+            <video id="webcamVideo" playsinline autoplay muted></video>
+            <!-- Main composite output canvas -->
+            <canvas id="stageCanvas" width="960" height="540"></canvas>
+
+            <!-- Floating Stage Overlays -->
+            <div class="stage-hud-top">
+              <div class="gesture-guide-chip left-chip" id="leftHandHud">
+                <span class="chip-tag">LEFT HAND // SHADER &amp; FILTER</span>
+                <span class="chip-val" id="leftHandVal">待機中 (カメラに左手をかざすかマウス操作)</span>
+              </div>
+              <div class="gesture-guide-chip right-chip" id="rightHandHud">
+                <span class="chip-tag">RIGHT HAND // PULSE &amp; ARP</span>
+                <span class="chip-val" id="rightHandVal">待機中 (カメラに右手をかざすかマウス操作)</span>
+              </div>
+            </div>
+
+            <!-- Interactive prompt banner at bottom of video -->
+            <div class="stage-hud-bottom">
+              <div class="ai-caption-box">
+                <div class="ai-caption-header">
+                  <span class="ai-sparkle">✦ GEMINI VISION × LYRIA CAMERA DIRECTOR</span>
+                  <span class="ai-source-badge" id="aiSourceBadge">REALTIME VISION</span>
+                </div>
+                <p class="ai-scene-text" id="aiSceneText">
+                  「カメラ＆音楽スタート」をクリックすると、PCカメラの色彩・輝度・動き・手のジェスチャーを解析し、リアルタイムにシンセサイザーとビートを奏でます。
+                </p>
+                <p class="ai-direction-text" id="aiDirectionText">
+                  左手でコード感とシェーダー形状、右手でパルス（テンポ感・アルペジオ密度・色相）をコントロールできます。
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <!-- Vision Feature Meters under Canvas -->
+          <div class="vision-meters-bar">
+            <div class="v-meter">
+              <div class="v-meter-label">
+                <span>輝度 (Brightness → Filter Cutoff)</span>
+                <strong id="valBrightness">50%</strong>
+              </div>
+              <div class="v-meter-track">
+                <div class="v-meter-fill fill-cyan" id="barBrightness" style="width: 50%"></div>
+              </div>
+            </div>
+
+            <div class="v-meter">
+              <div class="v-meter-label">
+                <span>動きエネルギー (Motion → Drum &amp; BPM)</span>
+                <strong id="valMotion">25%</strong>
+              </div>
+              <div class="v-meter-track">
+                <div class="v-meter-fill fill-magenta" id="barMotion" style="width: 25%"></div>
+              </div>
+            </div>
+
+            <div class="v-meter">
+              <div class="v-meter-label">
+                <span>主色相 (Dominant Hue → Scale &amp; Harmony)</span>
+                <strong id="valHue">190°</strong>
+              </div>
+              <div class="v-meter-track hue-rainbow-track">
+                <div class="hue-indicator" id="markerHue" style="left: 52%"></div>
+              </div>
+            </div>
+
+            <div class="v-meter">
+              <div class="v-meter-label">
+                <span>ジェスチャー変調 (Hand/Mouse Pinch → Resonance)</span>
+                <strong id="valGesture">30%</strong>
+              </div>
+              <div class="v-meter-track">
+                <div class="v-meter-fill fill-amber" id="barGesture" style="width: 30%"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Live 16-Step Sequencer & Spectrum Visualizer Card -->
+        <div class="sequencer-card">
+          <div class="seq-header">
+            <div>
+              <h2>LIVE 16-STEP GENERATIVE SEQUENCER &amp; AUDIO SPECTRUM</h2>
+              <p>カメラの視覚エネルギーとAIプロンプトからリアルタイム生成される4トラック・パターン</p>
+            </div>
+            <div class="seq-controls">
+              <label class="toggle-pill">
+                <input type="checkbox" id="chkCameraSteer" checked />
+                <span>カメラ自動ステアリング連動</span>
+              </label>
+              <label class="toggle-pill">
+                <input type="checkbox" id="chkAutoGemini" checked />
+                <span>Gemini定期シーン解析 (6秒毎)</span>
+              </label>
+            </div>
+          </div>
+
+          <div class="seq-body">
+            <div class="step-grid-container" id="stepGridContainer">
+              <!-- Populated by JS: 4 rows (POLY PAD, NEON ARP, ACID BASS, PULSE DRUMS) x 16 steps -->
+            </div>
+            <div class="spectrum-box">
+              <canvas id="spectrumCanvas" width="320" height="148"></canvas>
+              <div class="spectrum-overlay-info">
+                <span id="txtCurrentChord">CHORD: Cm9</span>
+                <span id="txtStepCount">STEP: 01 / 16</span>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- Right Column: Sound Presets, Lyria Weighted Prompts, Synth Mixer -->
+      <aside class="control-column">
+        <!-- Preset / Vibe Selector -->
+        <div class="panel-card">
+          <div class="panel-title-row">
+            <h3>🎛 SOUND WORLD PRESETS</h3>
+            <span class="badge-subtle">Future VJ Vibes</span>
+          </div>
+          <div class="preset-grid">
+            <button class="preset-btn active" data-preset="keynote_techno">
+              <span class="preset-name">Future VJ Live Set</span>
+              <span class="preset-desc">Melodic Techno • Shader &amp; Gesture Synth</span>
+            </button>
+            <button class="preset-btn" data-preset="lyria_ambient">
+              <span class="preset-name">Lyria Ambient Cinema</span>
+              <span class="preset-desc">浮遊感あふれるパッド＆クリスタルアルペジオ</span>
+            </button>
+            <button class="preset-btn" data-preset="vegas_acid">
+              <span class="preset-name">Las Vegas Neon Acid</span>
+              <span class="preset-desc">303アシッドベース＆ドライビングビート</span>
+            </button>
+            <button class="preset-btn" data-preset="sunset_lofi">
+              <span class="preset-name">Warm Sunset Groove</span>
+              <span class="preset-desc">ジャジーなコード感とメロウなパルス</span>
+            </button>
+          </div>
+        </div>
+
+        <!-- Lyria RealTime Weighted Prompts -->
+        <div class="panel-card">
+          <div class="panel-title-row">
+            <h3>✨ LYRIA REALTIME WEIGHTED PROMPTS</h3>
+            <span class="badge-subtle" id="promptSourceTag">Camera Steered</span>
+          </div>
+          <p class="panel-helper">カメラの映像解析結果に応じて重み付けが自動変化します（手動調整・追加も可能）</p>
+
+          <div id="weightedPromptsList" class="prompts-list">
+            <!-- Populated dynamically -->
+          </div>
+
+          <div class="custom-prompt-row">
+            <input type="text" id="inputCustomPrompt" placeholder="音楽プロンプトを追加 (例: Euphoric Synth Lead)" />
+            <button id="btnAddPrompt" class="btn btn-secondary btn-sm">+ 追加</button>
+          </div>
+        </div>
+
+        <!-- Real-Time Synth & Track Mixer -->
+        <div class="panel-card">
+          <div class="panel-title-row">
+            <h3>🎚 REAL-TIME SYNTH &amp; TRACK MIXER</h3>
+            <button id="btnTriggerDrop" class="btn btn-accent btn-xs">⚡ ライザー＆ドロップ発動</button>
+          </div>
+
+          <div class="track-toggles">
+            <button class="track-mute-btn active" data-track="pad">PAD</button>
+            <button class="track-mute-btn active" data-track="arp">ARP</button>
+            <button class="track-mute-btn active" data-track="bass">BASS</button>
+            <button class="track-mute-btn active" data-track="drums">DRUMS</button>
+          </div>
+
+          <div class="sliders-stack">
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sliderBpm">テンポ (BPM)</label>
+                <span id="lblBpm">122 BPM</span>
+              </div>
+              <input type="range" id="sliderBpm" min="80" max="150" value="122" />
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sliderCutoff">ローパスフィルター (Filter Cutoff)</label>
+                <span id="lblCutoff">68%</span>
+              </div>
+              <input type="range" id="sliderCutoff" min="10" max="100" value="68" />
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sliderReverb">空間リバーブ＆ディレイ (Space Mix)</label>
+                <span id="lblReverb">45%</span>
+              </div>
+              <input type="range" id="sliderReverb" min="0" max="95" value="45" />
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sliderArp">アルペジオ密度 (Arp &amp; Lead Density)</label>
+                <span id="lblArp">65%</span>
+              </div>
+              <input type="range" id="sliderArp" min="10" max="100" value="65" />
+            </div>
+
+            <div class="slider-row">
+              <div class="slider-header">
+                <label for="sliderVolume">マスター音量 (Master Gain)</label>
+                <span id="lblVolume">80%</span>
+              </div>
+              <input type="range" id="sliderVolume" min="0" max="100" value="80" />
+            </div>
+          </div>
+
+          <div class="scale-selector-row">
+            <label for="selectRoot">Key / Scale:</label>
+            <select id="selectRoot">
+              <option value="C">C</option>
+              <option value="D">D</option>
+              <option value="E">E</option>
+              <option value="F">F</option>
+              <option value="G">G</option>
+              <option value="A">A</option>
+              <option value="B">B</option>
+            </select>
+            <select id="selectScale">
+              <option value="dorian" selected>Dorian (Future VJ Techno)</option>
+              <option value="minor">Natural Minor (Cyber)</option>
+              <option value="lydian">Lydian (Cosmic Bright)</option>
+              <option value="phrygian">Phrygian (Laser Acid)</option>
+              <option value="pentatonic">Minor Pentatonic</option>
+              <option value="major">Major (Euphoric)</option>
+            </select>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <!-- API / Lyria RealTime Modal -->
+  <div class="modal-backdrop hidden" id="apiModalBackdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h3>⚙ Gemini Vision &amp; Lyria RealTime 設定</h3>
+        <button id="btnCloseModal" class="btn-icon-close">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="modal-desc">
+          このアプリは<strong>内蔵Web Audioシンセサイザー＋MediaPipeハンドトラッキング＋視覚解析エンジン</strong>により、APIキーなしでも単体でリアルタイム音楽生成が可能です。<br />
+          さらに Google AI Studio の <code>GEMINI_API_KEY</code> を入力すると、<strong>Gemini 3.8 Flash による高度なマルチモーダル映像解釈</strong>および <strong>Lyria RealTime (<code>models/lyria-realtime-exp</code>) WebSocket音声ストリーミング</strong>を有効化できます。
+        </p>
+
+        <div class="form-group">
+          <label for="inputApiKey">Google AI Studio API Key (任意)</label>
+          <input type="password" id="inputApiKey" placeholder="AIzaSy..." autocomplete="off" />
+        </div>
+
+        <div class="form-group">
+          <label class="toggle-pill">
+            <input type="checkbox" id="chkEnableLyriaStream" />
+            <span>Lyria RealTime (<code>models/lyria-realtime-exp</code>) WebSocket生音声ストリームを接続する</span>
+          </label>
+          <p class="small-note" id="lyriaStreamStatus">ステータス: 内蔵Web Audioジェネレーティブ・シンセサイザー稼働中</p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button id="btnSaveApi" class="btn btn-primary">保存して適用</button>
+      </div>
+    </div>
+  </div>
+
+  <script type="module" src="/static/main.js"></script>
+</body>
+</html>
