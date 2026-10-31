@@ -139,24 +139,45 @@ audioEngine.onStepCallback = highlightSequencerStep;
 
 // 2. Render Weighted Prompts UI
 function renderWeightedPrompts() {
-  weightedPromptsList.innerHTML = '';
+  weightedPromptsList.textContent = '';
   weightedPrompts.forEach((item, idx) => {
     const div = document.createElement('div');
     div.className = 'prompt-item';
-    div.innerHTML = `
-      <div class="prompt-item-top">
-        <span class="prompt-text">${item.text}</span>
-        <span class="prompt-weight" id="pwVal_${idx}">${Number(item.weight).toFixed(2)}</span>
-      </div>
-      <input type="range" class="prompt-slider" min="0.05" max="1.0" step="0.05" value="${item.weight}" data-idx="${idx}" />
-    `;
-    const slider = div.querySelector('.prompt-slider');
+
+    const topRow = document.createElement('div');
+    topRow.className = 'prompt-item-top';
+
+    const textSpan = document.createElement('span');
+    textSpan.className = 'prompt-text';
+    textSpan.textContent = String(item.text ?? '');
+
+    const weightSpan = document.createElement('span');
+    weightSpan.className = 'prompt-weight';
+    weightSpan.id = `pwVal_${idx}`;
+    const safeWeight = Number.isFinite(Number(item.weight)) ? Number(item.weight) : 0.8;
+    weightSpan.textContent = safeWeight.toFixed(2);
+
+    topRow.appendChild(textSpan);
+    topRow.appendChild(weightSpan);
+
+    const slider = document.createElement('input');
+    slider.type = 'range';
+    slider.className = 'prompt-slider';
+    slider.min = '0.05';
+    slider.max = '1.0';
+    slider.step = '0.05';
+    slider.value = String(safeWeight);
+    slider.dataset.idx = String(idx);
+
     slider.addEventListener('input', (e) => {
       const val = parseFloat(e.target.value);
       weightedPrompts[idx].weight = val;
-      document.getElementById(`pwVal_${idx}`).textContent = val.toFixed(2);
+      weightSpan.textContent = val.toFixed(2);
       sendPromptsToLyriaIfConnected();
     });
+
+    div.appendChild(topRow);
+    div.appendChild(slider);
     weightedPromptsList.appendChild(div);
   });
 }
