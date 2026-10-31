@@ -10,7 +10,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from google import genai
 from google.genai import types
@@ -35,14 +35,19 @@ app.add_middleware(
 )
 
 
+MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
+
+
 class FrameAnalysisRequest(BaseModel):
-    image_base64: str
-    api_key: Optional[str] = None
-    current_genre: Optional[str] = "keynote_techno"
-    motion_energy: Optional[float] = 0.5
-    brightness: Optional[float] = 0.5
-    dominant_hue: Optional[float] = 180.0
-    hand_summary: Optional[str] = None
+    image_base64: str = Field(..., min_length=16, max_length=2_800_000)
+    api_key: Optional[str] = Field(default=None, max_length=256)
+    current_genre: Optional[str] = Field(
+        default="keynote_techno", max_length=64, pattern=r"^[a-zA-Z0-9_-]+$"
+    )
+    motion_energy: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
+    brightness: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
+    dominant_hue: Optional[float] = Field(default=180.0, ge=0.0, le=360.0)
+    hand_summary: Optional[str] = Field(default=None, max_length=200)
 
 
 class WeightedPromptItem(BaseModel):
@@ -193,7 +198,12 @@ async def analyze_frame(req: FrameAnalysisRequest):
             header, raw_b64 = raw_b64.split(",", 1)
             if "image/png" in header:
                 mime_type = "image/png"
-        image_bytes = base64.b64decode(raw_b64)
+        try:
+            image_bytes = base64.b64decode(raw_b64, validate=True)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid base64 image payload.")
+        if len(image_bytes) > MAX_IMAGE_BYTES:
+            raise HTTPException(status_code=413, detail="Image payload exceeds 2MB limit.")
         if image_bytes.startswith(b"\x89PNG"):
             mime_type = "image/png"
 
@@ -270,6 +280,8 @@ async def analyze_frame(req: FrameAnalysisRequest):
             weighted_prompts=prompts,
             source="gemini-4-argon",
         )
+    except HTTPException:
+        raise
     except Exception as exc:
         logger.warning("Gemini frame analysis fallback triggered: %s", exc)
         return _heuristic_scene_analysis(req)
