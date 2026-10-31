@@ -1,19 +1,19 @@
 import asyncio
 import base64
+import binascii
+import contextlib
 import json
 import logging
 import os
 from pathlib import Path
-from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel, Field
-
 from google import genai
 from google.genai import types
+from pydantic import BaseModel, Field
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger("nototoki")
@@ -54,14 +54,14 @@ MAX_IMAGE_BYTES = 2 * 1024 * 1024  # 2 MB
 
 class FrameAnalysisRequest(BaseModel):
     image_base64: str = Field(..., min_length=16, max_length=2_800_000)
-    api_key: Optional[str] = Field(default=None, max_length=256)
-    current_genre: Optional[str] = Field(
+    api_key: str | None = Field(default=None, max_length=256)
+    current_genre: str | None = Field(
         default="keynote_techno", max_length=64, pattern=r"^[a-zA-Z0-9_-]+$"
     )
-    motion_energy: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
-    brightness: Optional[float] = Field(default=0.5, ge=0.0, le=1.0)
-    dominant_hue: Optional[float] = Field(default=180.0, ge=0.0, le=360.0)
-    hand_summary: Optional[str] = Field(default=None, max_length=200)
+    motion_energy: float | None = Field(default=0.5, ge=0.0, le=1.0)
+    brightness: float | None = Field(default=0.5, ge=0.0, le=1.0)
+    dominant_hue: float | None = Field(default=180.0, ge=0.0, le=360.0)
+    hand_summary: str | None = Field(default=None, max_length=200)
 
 
 class WeightedPromptItem(BaseModel):
@@ -80,19 +80,26 @@ class FrameAnalysisResponse(BaseModel):
     reverb_mix: float
     arp_density: float
     drum_intensity: float
-    weighted_prompts: List[WeightedPromptItem]
+    weighted_prompts: list[WeightedPromptItem]
     source: str
 
 
-def _get_genai_client(api_key: Optional[str] = None) -> Optional[genai.Client]:
-    key = (api_key or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+def _get_genai_client(api_key: str | None = None) -> genai.Client | None:
+    key = (
+        api_key
+        or os.environ.get("GEMINI_API_KEY")
+        or os.environ.get("GOOGLE_API_KEY")
+        or ""
+    ).strip()
     if key:
         return genai.Client(api_key=key)
-    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GEMINI_DEFAULT_PROJECT")
+    project = os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get(
+        "GEMINI_DEFAULT_PROJECT"
+    )
     if project:
         try:
             return genai.Client(vertexai=True, project=project, location="global")
-        except Exception as exc:
+        except Exception as exc:  # noqa: BLE001
             logger.warning("Failed to initialize Vertex AI client: %s", exc)
     return None
 
@@ -149,7 +156,9 @@ def _heuristic_scene_analysis(req: FrameAnalysisRequest) -> FrameAnalysisRespons
         arp_dens = 0.35
 
     hand_note = f" / ハンドジェスチャー: {req.hand_summary}" if req.hand_summary else ""
-    scene_ja = f"{color_desc}・{motion_desc}（輝度 {int(brightness * 100)}%）{hand_note}"
+    scene_ja = (
+        f"{color_desc}・{motion_desc}（輝度 {int(brightness * 100)}%）{hand_note}"
+    )
     direction_ja = (
         f"キー {root} {scale.capitalize()} / {bpm} BPM — "
         f"カメラの色相と動きに合わせてフィルターとアルペジオをリアルタイム変調中"
@@ -178,7 +187,9 @@ def _heuristic_scene_analysis(req: FrameAnalysisRequest) -> FrameAnalysisRespons
         suggested_bpm=bpm,
         suggested_scale=scale,
         root_note=root,
-        filter_cutoff_norm=round(min(1.0, max(0.15, brightness * 0.85 + motion * 0.25)), 2),
+        filter_cutoff_norm=round(
+            min(1.0, max(0.15, brightness * 0.85 + motion * 0.25)), 2
+        ),
         reverb_mix=round(min(0.85, max(0.15, 0.75 - motion * 0.4)), 2),
         arp_density=round(arp_dens, 2),
         drum_intensity=round(drum_int, 2),
@@ -189,8 +200,13 @@ def _heuristic_scene_analysis(req: FrameAnalysisRequest) -> FrameAnalysisRespons
 
 @app.get("/api/status")
 async def get_status():
-    has_env_key = bool(os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY"))
-    has_vertex = bool(os.environ.get("GOOGLE_CLOUD_PROJECT") or os.environ.get("GEMINI_DEFAULT_PROJECT"))
+    has_env_key = bool(
+        os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    )
+    has_vertex = bool(
+        os.environ.get("GOOGLE_CLOUD_PROJECT")
+        or os.environ.get("GEMINI_DEFAULT_PROJECT")
+    )
     return {
         "status": "ok",
         "app": "Future VJ",
@@ -214,10 +230,14 @@ async def analyze_frame(req: FrameAnalysisRequest):
                 mime_type = "image/png"
         try:
             image_bytes = base64.b64decode(raw_b64, validate=True)
-        except Exception:
-            raise HTTPException(status_code=400, detail="Invalid base64 image payload.")
+        except (binascii.Error, ValueError) as exc:
+            raise HTTPException(
+                status_code=400, detail="Invalid base64 image payload."
+            ) from exc
         if len(image_bytes) > MAX_IMAGE_BYTES:
-            raise HTTPException(status_code=413, detail="Image payload exceeds 2MB limit.")
+            raise HTTPException(
+                status_code=413, detail="Image payload exceeds 2MB limit."
+            )
         if image_bytes.startswith(b"\x89PNG"):
             mime_type = "image/png"
 
@@ -270,10 +290,21 @@ async def analyze_frame(req: FrameAnalysisRequest):
             for p in data.get("weighted_prompts", [])[:4]
         ]
         if not prompts:
-            prompts = [WeightedPromptItem(text="Futuristic Melodic Techno, Lush Synth Pad", weight=1.0)]
+            prompts = [
+                WeightedPromptItem(
+                    text="Futuristic Melodic Techno, Lush Synth Pad", weight=1.0
+                )
+            ]
 
         scale = str(data.get("suggested_scale", "dorian")).lower()
-        if scale not in {"minor", "dorian", "phrygian", "lydian", "major", "pentatonic"}:
+        if scale not in {
+            "minor",
+            "dorian",
+            "phrygian",
+            "lydian",
+            "major",
+            "pentatonic",
+        }:
             scale = "dorian"
 
         root = str(data.get("root_note", "C")).upper()[:1]
@@ -281,13 +312,21 @@ async def analyze_frame(req: FrameAnalysisRequest):
             root = "C"
 
         return FrameAnalysisResponse(
-            scene_description_ja=str(data.get("scene_description_ja", "カメラ映像を解析中")),
+            scene_description_ja=str(
+                data.get("scene_description_ja", "カメラ映像を解析中")
+            ),
             scene_mood=str(data.get("scene_mood", "Dynamic AI Groove")),
-            musical_direction_ja=str(data.get("musical_direction_ja", "映像の色彩と動きからシンセパラメータを生成")),
+            musical_direction_ja=str(
+                data.get(
+                    "musical_direction_ja", "映像の色彩と動きからシンセパラメータを生成"
+                )
+            ),
             suggested_bpm=max(80, min(150, int(data.get("suggested_bpm", 120)))),
             suggested_scale=scale,
             root_note=root,
-            filter_cutoff_norm=max(0.1, min(1.0, float(data.get("filter_cutoff_norm", 0.65)))),
+            filter_cutoff_norm=max(
+                0.1, min(1.0, float(data.get("filter_cutoff_norm", 0.65)))
+            ),
             reverb_mix=max(0.1, min(0.9, float(data.get("reverb_mix", 0.4)))),
             arp_density=max(0.1, min(1.0, float(data.get("arp_density", 0.6)))),
             drum_intensity=max(0.1, min(1.0, float(data.get("drum_intensity", 0.6)))),
@@ -296,7 +335,7 @@ async def analyze_frame(req: FrameAnalysisRequest):
         )
     except HTTPException:
         raise
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Gemini frame analysis fallback triggered: %s", exc)
         return _heuristic_scene_analysis(req)
 
@@ -317,11 +356,11 @@ async def lyria_realtime_ws(websocket: WebSocket):
                 api_key = client_key
         else:
             buffered_first_msg = init_msg
-    except asyncio.TimeoutError:
+    except TimeoutError:
         pass
     except WebSocketDisconnect:
         return
-    except Exception as exc:
+    except (json.JSONDecodeError, TypeError, ValueError, AttributeError) as exc:
         logger.warning("Failed to parse initial WebSocket message: %s", exc)
 
     if not api_key:
@@ -336,25 +375,37 @@ async def lyria_realtime_ws(websocket: WebSocket):
 
     client = genai.Client(api_key=api_key, http_options={"api_version": "v1alpha"})
     try:
-        async with client.aio.live.music.connect(model="models/lyria-realtime-exp") as session:
-            await websocket.send_json({"type": "connected", "model": "models/lyria-realtime-exp"})
+        async with client.aio.live.music.connect(
+            model="models/lyria-realtime-exp"
+        ) as session:
+            await websocket.send_json(
+                {"type": "connected", "model": "models/lyria-realtime-exp"}
+            )
 
             async def receive_from_lyria():
                 try:
                     async for message in session.receive():
                         server_content = getattr(message, "server_content", None)
-                        if server_content and getattr(server_content, "audio_chunks", None):
+                        if server_content and getattr(
+                            server_content, "audio_chunks", None
+                        ):
                             for chunk in server_content.audio_chunks:
                                 if chunk.data:
-                                    b64_audio = base64.b64encode(chunk.data).decode("ascii")
+                                    b64_audio = base64.b64encode(chunk.data).decode(
+                                        "ascii"
+                                    )
                                     await websocket.send_json(
                                         {
                                             "type": "audio",
                                             "data": b64_audio,
-                                            "mime_type": getattr(chunk, "mime_type", "audio/pcm;rate=48000"),
+                                            "mime_type": getattr(
+                                                chunk,
+                                                "mime_type",
+                                                "audio/pcm;rate=48000",
+                                            ),
                                         }
                                     )
-                except Exception as exc:
+                except Exception as exc:  # noqa: BLE001
                     logger.warning("Lyria receive loop ended: %s", exc)
 
             lyria_task = asyncio.create_task(receive_from_lyria())
@@ -363,7 +414,9 @@ async def lyria_realtime_ws(websocket: WebSocket):
                 action = msg.get("action")
                 if action == "set_prompts":
                     prompts = [
-                        types.WeightedPrompt(text=p["text"], weight=float(p.get("weight", 1.0)))
+                        types.WeightedPrompt(
+                            text=p["text"], weight=float(p.get("weight", 1.0))
+                        )
                         for p in msg.get("prompts", [])
                         if p.get("text")
                     ]
@@ -397,21 +450,17 @@ async def lyria_realtime_ws(websocket: WebSocket):
                 pass
             finally:
                 lyria_task.cancel()
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         logger.warning("Lyria RealTime session error: %s", exc)
-        try:
+        with contextlib.suppress(Exception):
             await websocket.send_json(
                 {
                     "type": "error",
                     "message": "Lyria RealTime接続中にエラーが発生しました。APIキーまたは接続設定をご確認ください。",
                 }
             )
-        except Exception:
-            pass
-        try:
+        with contextlib.suppress(Exception):
             await websocket.close()
-        except Exception:
-            pass
 
 
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
