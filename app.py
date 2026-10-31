@@ -386,7 +386,12 @@ async def lyria_realtime_ws(websocket: WebSocket):
     except Exception as exc:
         logger.warning("Lyria RealTime session error: %s", exc)
         try:
-            await websocket.send_json({"type": "error", "message": f"Lyria RealTime接続エラー: {exc}"})
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": "Lyria RealTime接続中にエラーが発生しました。APIキーまたは接続設定をご確認ください。",
+                }
+            )
         except Exception:
             pass
         try:
