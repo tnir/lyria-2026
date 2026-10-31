@@ -331,11 +331,17 @@ function connectLyriaWebSocket() {
   }
 
   const proto = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const wsUrl = `${proto}//${window.location.host}/ws/lyria?api_key=${encodeURIComponent(userApiKey)}`;
+  const wsUrl = `${proto}//${window.location.host}/ws/lyria`;
   lyriaStreamStatus.textContent = 'ステータス: Lyria RealTime (models/lyria-realtime-exp) へ接続中...';
 
   lyriaSocket = new WebSocket(wsUrl);
   lyriaSocket.onopen = () => {
+    lyriaSocket.send(
+      JSON.stringify({
+        action: 'init',
+        api_key: userApiKey || null,
+      })
+    );
     sendPromptsToLyriaIfConnected();
     lyriaSocket.send(
       JSON.stringify({

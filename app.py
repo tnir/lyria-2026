@@ -279,7 +279,25 @@ async def analyze_frame(req: FrameAnalysisRequest):
 async def lyria_realtime_ws(websocket: WebSocket):
     """WebSocket proxy to Google AI Studio Lyria RealTime (models/lyria-realtime-exp)."""
     await websocket.accept()
-    api_key = websocket.query_params.get("api_key") or os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
+    buffered_first_msg = None
+
+    try:
+        raw_init = await asyncio.wait_for(websocket.receive_text(), timeout=5.0)
+        init_msg = json.loads(raw_init)
+        if init_msg.get("action") == "init":
+            client_key = (init_msg.get("api_key") or "").strip()
+            if client_key:
+                api_key = client_key
+        else:
+            buffered_first_msg = init_msg
+    except asyncio.TimeoutError:
+        pass
+    except WebSocketDisconnect:
+        return
+    except Exception as exc:
+        logger.warning("Failed to parse initial WebSocket message: %s", exc)
+
     if not api_key:
         await websocket.send_json(
             {
@@ -315,36 +333,40 @@ async def lyria_realtime_ws(websocket: WebSocket):
 
             lyria_task = asyncio.create_task(receive_from_lyria())
 
+            async def handle_client_msg(msg: dict):
+                action = msg.get("action")
+                if action == "set_prompts":
+                    prompts = [
+                        types.WeightedPrompt(text=p["text"], weight=float(p.get("weight", 1.0)))
+                        for p in msg.get("prompts", [])
+                        if p.get("text")
+                    ]
+                    if prompts:
+                        await session.set_weighted_prompts(prompts=prompts)
+                elif action == "set_config":
+                    cfg = msg.get("config", {})
+                    await session.set_music_generation_config(
+                        config=types.LiveMusicGenerationConfig(
+                            bpm=int(cfg.get("bpm", 120)),
+                            density=float(cfg.get("density", 0.6)),
+                            brightness=float(cfg.get("brightness", 0.6)),
+                            guidance=float(cfg.get("guidance", 4.0)),
+                        )
+                    )
+                elif action == "play":
+                    await session.play()
+                elif action == "pause":
+                    await session.pause()
+                elif action == "stop":
+                    await session.stop()
+
             try:
+                if buffered_first_msg:
+                    await handle_client_msg(buffered_first_msg)
                 while True:
                     raw = await websocket.receive_text()
                     msg = json.loads(raw)
-                    action = msg.get("action")
-
-                    if action == "set_prompts":
-                        prompts = [
-                            types.WeightedPrompt(text=p["text"], weight=float(p.get("weight", 1.0)))
-                            for p in msg.get("prompts", [])
-                            if p.get("text")
-                        ]
-                        if prompts:
-                            await session.set_weighted_prompts(prompts=prompts)
-                    elif action == "set_config":
-                        cfg = msg.get("config", {})
-                        await session.set_music_generation_config(
-                            config=types.LiveMusicGenerationConfig(
-                                bpm=int(cfg.get("bpm", 120)),
-                                density=float(cfg.get("density", 0.6)),
-                                brightness=float(cfg.get("brightness", 0.6)),
-                                guidance=float(cfg.get("guidance", 4.0)),
-                            )
-                        )
-                    elif action == "play":
-                        await session.play()
-                    elif action == "pause":
-                        await session.pause()
-                    elif action == "stop":
-                        await session.stop()
+                    await handle_client_msg(msg)
             except WebSocketDisconnect:
                 pass
             finally:
