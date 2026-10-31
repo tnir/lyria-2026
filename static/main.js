@@ -68,7 +68,8 @@ const selectRoot = document.getElementById('selectRoot');
 const selectScale = document.getElementById('selectScale');
 
 // State
-let userApiKey = localStorage.getItem('nototoki_gemini_api_key') || '';
+localStorage.removeItem('nototoki_gemini_api_key');
+let userApiKey = sessionStorage.getItem('nototoki_gemini_api_key') || '';
 inputApiKey.value = userApiKey;
 
 let weightedPrompts = [
@@ -582,7 +583,11 @@ btnCloseModal.addEventListener('click', () => {
 
 btnSaveApi.addEventListener('click', () => {
   userApiKey = inputApiKey.value.trim();
-  localStorage.setItem('nototoki_gemini_api_key', userApiKey);
+  if (userApiKey) {
+    sessionStorage.setItem('nototoki_gemini_api_key', userApiKey);
+  } else {
+    sessionStorage.removeItem('nototoki_gemini_api_key');
+  }
   connectLyriaWebSocket();
   apiModalBackdrop.classList.add('hidden');
   triggerFrameAnalysis();
